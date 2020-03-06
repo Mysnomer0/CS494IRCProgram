@@ -3,7 +3,8 @@
 from room import Room
 from client import Client
 import sys
-import socket
+from socket import *
+import threading
 import select
 
 class Server:
@@ -14,6 +15,7 @@ class Server:
         self.socketList = []
         self.receiveBuffer = 4096 
         self.port = 9090
+        self.FLAG = False
 
     def StartServer(self):
         
@@ -84,6 +86,44 @@ class Server:
                     socket.close()
                     if socket in self.socketList:
                         self.socketList.remove(socket)
+    
+    # function for receiving message from client
+    def recv_from_client(conn):
+        try:
+            # Receives the request message from the client
+            while True:
+                if self.FLAG == True:
+                    break
+                message = conn.recv(1024).decode()
+                # if 'q' is received from the client the server quits
+                if message == 'q':
+                    conn.send('q'.encode())
+                    print('Closing connection')
+                    conn.close()
+                    self.FLAG = True
+                    break
+                print('Client: ' + message)
+        except:
+            conn.close()
+
+
+    # function for receiving message from client
+    def send_to_client(conn):
+        try:
+            while True:
+                if self.FLAG == True:
+                    break
+                send_msg = input('')
+                # the server can provide 'q' as an input if it wish to quit
+                if send_msg == 'q':
+                    conn.send('q'.encode())
+                    print('Closing connection')
+                    conn.close()
+                    self.FLAG = True
+                    break
+                conn.send(send_msg.encode())
+        except:
+            conn.close()
  
 if __name__ == "__main__":
 
