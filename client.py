@@ -1,67 +1,105 @@
-import sys
 import socket
 import select
+import errno
+import threading
+import sys
 
-class Client:
-    def __init__(self, name, host, port):
-        self.name = name
-        self.host = host
-        self.port = port
-        self.exit = False
+HEADER_LENGTH = 10
 
-        # Get the socket isntance
-        currentSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        currentSocket.settimeout(2)
-        
-        # Try to connect to the host
-        try:
-            currentSocket.connect((self.host, self.port))
-        except :
-            print('Can\'t connect.')
-            return
-        
-        # Clear the standard out
-        print('Connected!')
-        sys.stdout.write('[Me] ')
-        sys.stdout.flush()
-        print('Starting loop')
-        # While we're connected, listen on the socket
-        while not self.exit:
-            # Get the socket list
-            socketList = [sys.stdin, currentSocket]
-            # Get the list sockets which are readable
-            readyToRead,readyToWrite,inError = select.select(socketList , [], [])
-            # Go through all the sockets
-            for sock in readyToRead:
-                # If we're on the server's socket   
-                if sock == currentSocket:
-                    # Get the data from the received message
-                    data = sock.recv(4096)
-                    # If the data is nonexistent, this means we've been disconnected
-                    if not data:
-                        print('\nDisconnected from server')
-                        self.exit = True
-                        break
-                    # Otherwise, output the received data
-                    else:                    
-                        sys.stdout.write(data)
-                        sys.stdout.write('[Me] ')
-                        sys.stdout.flush()     
-                # Otherwise, read the input
-                else:
-                    # user entered a message
-                    message = sys.stdin.readline()
-                    currentSocket.send(message)
-                    sys.stdout.write('[Me] ')
-                    sys.stdout.flush()
+IP = "127.0.0.1"
+PORT = 1234
+EXIT_FLAG = False
+my_username = input("Username: ")
 
+# Create a socket
+# socket.AF_INET - address family, IPv4, some otehr possible are AF_INET6, AF_BLUETOOTH, AF_UNIX
+# socket.SOCK_STREAM - TCP, conection-based, socket.SOCK_DGRAM - UDP, connectionless, datagrams, socket.SOCK_RAW - raw IP packets
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-if __name__ == '__main__':
-    
-    # Parse the arguments
-    while True:
-        if input('Would you like to create a new connection? (y/n) ') == 'n':
+# Connect to a given ip and port
+client_socket.connect((IP, PORT))
+
+# Set connection to non-blocking state, so .recv() call won;t block, just return some exception we'll handle
+client_socket.setblocking(False)
+
+# Prepare username and header and send them
+# We need to encode username to bytes, then count number of bytes and prepare header of fixed size, that we encode to bytes as well
+username = my_username.encode('utf-8')
+username_header = f"{len(username):<{HEADER_LENGTH}}".encode('utf-8')
+client_socket.send(username_header + username)
+
+def ReadInputThread():
+    global EXIT_FLAG
+    while not EXIT_FLAG:
+
+        # Wait for user to input a message
+        message = input(f'{my_username} > ')
+
+        # Read possible commands
+        if message == '/exit':
+            EXIT_FLAG = True
             break
-        # Create the client with the new connection
-        client = Client(input('What is your name? '), input('What host would you like to connect to? '), int(input('What port would you like to connect to? ')))
 
+        # If message is not empty - send it
+        if message:
+
+            # Encode message to bytes, prepare header and convert to bytes, like for username above, then send
+            message = message.encode('utf-8')
+            message_header = f"{len(message):<{HEADER_LENGTH}}".encode('utf-8')
+            client_socket.send(message_header + message)
+
+def ReceiveMessageThread():
+    global EXIT_FLAG
+    while not EXIT_FLAG:
+        try:
+            # Now we want to loop over received messages (there might be more than one) and print them
+            while True:
+
+                # Receive our "header" containing username length, it's size is defined and constant
+                username_header = client_socket.recv(HEADER_LENGTH)
+
+                # If we received no data, server gracefully closed a connection, for example using socket.close() or socket.shutdown(socket.SHUT_RDWR)
+                if not len(username_header):
+                    print('Connection closed by the server')
+                    EXIT_FLAG = True
+                    break
+
+                # Convert header to int value
+                username_length = int(username_header.decode('utf-8').strip())
+
+                # Receive and decode username
+                username = client_socket.recv(username_length).decode('utf-8')
+
+                # Now do the same for message (as we received username, we received whole message, there's no need to check if it has any length)
+                message_header = client_socket.recv(HEADER_LENGTH)
+                message_length = int(message_header.decode('utf-8').strip())
+                message = client_socket.recv(message_length).decode('utf-8')
+
+                # Print message
+                print(f'\n{username} > {message}')
+
+        except IOError as e:
+            # This is normal on non blocking connections - when there are no incoming data error is going to be raised
+            # Some operating systems will indicate that using AGAIN, and some using WOULDBLOCK error code
+            # We are going to check for both - if one of them - that's expected, means no incoming data, continue as normal
+            # If we got different error code - something happened
+            if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
+                print('Reading error: {}'.format(str(e)))
+                EXIT_FLAG = True
+
+            # We just did not receive anything
+            continue
+
+        except Exception as e:
+            # Any other exception - something happened, exit
+            print('Reading error: '.format(str(e)))
+            EXIT_FLAG = True
+
+inputThread = threading.Thread(target=ReadInputThread)
+receiveThread = threading.Thread(target=ReceiveMessageThread)
+
+inputThread.start()
+receiveThread.start()
+
+inputThread.join()
+receiveThread.join()
