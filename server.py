@@ -37,7 +37,7 @@ def ReadInputThread():
         # Read possible commands
         if message == '/exit':
             EXIT_FLAG = True
-            sys.exit()
+            #sys.exit()
             break
 
 # Receive and process messages from this socket
@@ -61,7 +61,7 @@ def ProcessMessagesThread():
     global EXIT_FLAG
     while not EXIT_FLAG:
         # Get the list of sockets
-        read_sockets, _, exception_sockets = select.select(sockets_list, [], sockets_list)
+        read_sockets, _, exception_sockets = select.select(sockets_list, [], sockets_list, 3.0)
 
         # Go through the list of sockets
         for notified_socket in read_sockets:
@@ -262,9 +262,7 @@ def ProcessMessagesThread():
 
         # Clean up the sockets when we get exceptions
         for notified_socket in exception_sockets:
-
             sockets_list.remove(notified_socket)
-
             del clients[notified_socket]
         
 
